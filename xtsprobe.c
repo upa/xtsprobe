@@ -338,8 +338,8 @@ int main(int argc, char **argv)
 		gettimeofday(&start, NULL);
 		ret = send_probe(raw_sock, segments, nsegs, src);
 		if (ret < 0) {
-			gettimeofday(&end, NULL);
 			pr_err("send failed: %s\n", strerror(errno));
+			gettimeofday(&end, NULL);
 			goto next;
 		}
 
@@ -352,10 +352,10 @@ int main(int argc, char **argv)
 				break;
 		}
 
+	next:
 		elapsed = ((end.tv_sec * 1000000 + end.tv_usec) -
 			   (start.tv_sec * 1000000 + start.tv_usec));
 
-	next:
 		if (elapsed < interval)
 			usleep(interval - elapsed);
  	}
