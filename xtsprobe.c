@@ -78,6 +78,7 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <poll.h>
 #include <linux/ipv6.h>
 #include <linux/seg6.h>
@@ -327,18 +328,23 @@ int main(int argc, char **argv)
 	for (n = 0; n < nsegs; n++) {
 		char buf[64];
 		inet_ntop(AF_INET6, &segments[n], buf, sizeof(buf));
-		printf("%d: %s\n", n, buf);
+		printf("[%d] %s\n", n, buf);
 	}
 
 	while (1) {
-		printf("xmit probe\n");
+		long elapsed;
+		struct timeval start, end;
+
+		gettimeofday(&start, NULL);
 		ret = send_probe(raw_sock, segments, nsegs, src);
 		if (ret < 0) {
+			gettimeofday(&end, NULL);
 			pr_err("send failed: %s\n", strerror(errno));
 			goto next;
 		}
 
 		ret = recv_probe(udp_sock, timeout);
+		gettimeofday(&end, NULL);
 
 		if (count > 0) {
 			count--;
@@ -346,8 +352,12 @@ int main(int argc, char **argv)
 				break;
 		}
 
+		elapsed = ((end.tv_sec * 1000000 + end.tv_usec) -
+			   (start.tv_sec * 1000000 + start.tv_usec));
+
 	next:
-		usleep(interval);
+		if (elapsed < interval)
+			usleep(interval - elapsed);
  	}
 
 	close(raw_sock);
