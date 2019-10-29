@@ -77,6 +77,7 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <poll.h>
 #include <linux/ipv6.h>
 #include <linux/seg6.h>
 
@@ -118,7 +119,24 @@ int create_raw_sock(void)
 
 int create_udp_sock(void)
 {
- 	int fd = 0;
+ 	int fd;
+	struct sockaddr_in6 in6;
+
+	fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+	if (fd < 0) {
+		pr_err("failed to create udp socket: %s\n", strerror(errno));
+		exit(1);
+	}
+
+	memset(&in6, 0, sizeof(in6));
+	in6.sin6_family = AF_INET6;
+	in6.sin6_port = htons(XTSPROBE_PORT);
+
+	if (bind(fd, (struct sockaddr *)&in6, sizeof(in6)) < 0) {
+		pr_err("failed to bind udp socket: %s\n", strerror(errno));
+		exit (1);
+	}
+
 	return fd;
 }
 
@@ -144,7 +162,7 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 	/* build IPv6 hdr */
 	memset(&ip6, 0, sizeof(ip6));
 	ip6.ip6_vfc = 6 << 4;
-	ip6.ip6_plen = htons(size);
+	ip6.ip6_plen = htons(size - sizeof(struct ip6_hdr));
 	ip6.ip6_hlim = 255;
 	ip6.ip6_src = src;
 	ip6.ip6_dst = segments[0];
@@ -186,7 +204,7 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 	iov[3].iov_base = &udp;
 	iov[3].iov_len = sizeof(udp);
 	iov[4].iov_base = payload;
-	iov[4].iov_len = sizeof(payload);
+	iov[4].iov_len = sizeof(struct sr6_xts) * nsegs;
 
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_iov = iov;
@@ -196,6 +214,46 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 
 	/* xmit */
 	ret = sendmsg(fd, &msg, 0);
+
+	return ret;
+}
+
+void print_probe(struct sr6_xts *xts, int nsegs)
+{
+	int n;
+
+	for (n = nsegs - 1; n >= 0; n--) {
+		char addr[64];
+		inet_ntop(AF_INET6, &xts[n].sid, addr, sizeof(addr));
+		printf("[%d]\t%s\t%ld.%ld\n", nsegs - n, addr,
+		       xts[n].tstamp.tv_sec, xts[n].tstamp.tv_nsec);
+	}
+}
+
+int recv_probe(int fd, int timeout)
+{
+	int ret, nsegs;
+	char buf[4096];
+	struct pollfd x[1] = { { .fd = fd, .events = POLLIN, } };
+
+	if (poll(x, 1, timeout) < 0) {
+		pr_err("poll failed: %s\n", strerror(errno));
+		return -1;
+	}
+
+	if (!x[0].revents & POLLIN) {
+		printf("Timeout\n");
+		return 0;
+	}
+
+	ret = read(fd, buf, sizeof(buf));
+	if (ret % sizeof(struct sr6_xts) != 0) {
+		pr_err("invalid recv len: %d\n", ret);
+		return -1;
+	}
+
+	nsegs = ret / sizeof(struct sr6_xts);
+	print_probe((struct sr6_xts *)buf, nsegs);
 
 	return ret;
 }
@@ -218,8 +276,8 @@ int main(int argc, char **argv)
 	struct in6_addr segments[MAX_SEGS];
 	struct in6_addr src = IN6ADDR_ANY_INIT;
 	int count = 0;
-	int timeout = 1000;	/* msec */
-	int interval = 1000000;	/* usec */
+	int timeout = 1000;	/* msec for poll() */
+	int interval = 1000000;	/* usec for usleep() */
 
 	int raw_sock;
 	int udp_sock;
@@ -265,8 +323,12 @@ int main(int argc, char **argv)
 	while (1) {
 		printf("xmit probe\n");
 		ret = send_probe(raw_sock, segments, nsegs, src);
-		if (ret < 0)
+		if (ret < 0) {
 			pr_err("send failed: %s\n", strerror(errno));
+			goto next;
+		}
+
+		ret = recv_probe(udp_sock, timeout);
 
 		if (count > 0) {
 			count--;
@@ -274,6 +336,7 @@ int main(int argc, char **argv)
 				break;
 		}
 
+	next:
 		usleep(interval);
  	}
 
