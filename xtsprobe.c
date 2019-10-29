@@ -143,6 +143,46 @@ int create_udp_sock(void)
 	return fd;
 }
 
+uint16_t checksum(struct in6_addr dst, struct in6_addr src, struct udphdr udp)
+{
+	char data[2048];
+	struct ip6p {
+		struct in6_addr src;
+		struct in6_addr dst;
+		uint32_t len;
+		uint16_t zero;
+		uint8_t zero2;
+		uint8_t nxt;
+	} *ip6p;
+
+	memset(data, 0, sizeof(data));
+	ip6p = (struct ip6p *)data;
+	ip6p->src = src;
+	ip6p->dst = dst;
+	ip6p->len = htonl(ntohs(udp.len));
+	ip6p->nxt = IPPROTO_UDP;
+
+	memcpy(ip6p + 1, &udp, sizeof(udp));
+
+	const uint8_t *addr = (uint8_t *)data;
+	uint32_t i, sum = 0;
+	uint16_t len = sizeof(struct ip6p) + ntohs(udp.len);
+
+        for (i = 0; i < (len & ~1U); i += 2) {
+                sum += (u_int16_t)ntohs(*((u_int16_t *)(addr + i)));
+                if (sum > 0xFFFF)
+                        sum -= 0xFFFF;
+        }
+
+        if (i < len) {
+                sum += addr[i] << 8;
+                if (sum > 0xFFFF)
+                        sum -= 0xFFFF;
+        }
+
+        return htons(~sum & 0xFFFF);
+}
+
 int send_probe(int fd, struct in6_addr *segments, int nsegs,
 	       struct in6_addr src)
 {
@@ -192,6 +232,7 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 	udp.len = htons(sizeof(struct udphdr) +
 			sizeof(struct sr6_xts) * nsegs);
 	udp.check = 0;
+	udp.check = checksum(segments[nsegs - 1], src, udp);
 
 	/* prepare packet for xmit */
 	memset(&in6, 0, sizeof(in6));
@@ -296,6 +337,10 @@ int main(int argc, char **argv)
 	while ((ch = getopt(argc, argv, "s:S:c:t:i:")) != -1) {
 		switch (ch) {
 		case 's':
+			if (nsegs >= MAX_SEGS) {
+				pr_err("too many segments\n");
+				return -1;
+			}
 			ret = inet_pton(AF_INET6, optarg, &segments[nsegs++]);
 			if (ret < 1) {
 				printf("invalid segment: %s\n",
@@ -319,6 +364,9 @@ int main(int argc, char **argv)
 		case 'i':
 			interval = (int)(atof(optarg) * 1000000);
 			break;
+		default:
+			usage();
+			return 1;
 		}
 	}
 
