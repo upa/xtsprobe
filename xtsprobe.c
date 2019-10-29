@@ -73,6 +73,7 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <netinet/ip6.h>
+#include <netinet/icmp6.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
@@ -80,6 +81,7 @@
 #include <poll.h>
 #include <linux/ipv6.h>
 #include <linux/seg6.h>
+#include <linux/errqueue.h>
 
 #define MAX_SEGS	128
 #define XTSPROBE_PORT	60001
@@ -175,7 +177,7 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 		       sizeof(struct in6_addr) * nsegs) >> 3);
 	srh.type = IPV6_SRCRT_TYPE_4;
 	srh.segments_left = nsegs - 1;
-	srh.first_segment = 0;
+	srh.first_segment = nsegs - 1;
 	srh.tag = htons(0);
 
 	/* build segment list */
@@ -233,8 +235,16 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 int recv_probe(int fd, int timeout)
 {
 	int ret, nsegs;
-	char buf[4096];
+	char buf[2048];
+	struct iovec iov;
+	struct msghdr msg;
 	struct pollfd x[1] = { { .fd = fd, .events = POLLIN, } };
+
+	iov.iov_base = buf;
+	iov.iov_len = sizeof(buf);
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
 
 	if (poll(x, 1, timeout) < 0) {
 		pr_err("poll failed: %s\n", strerror(errno));
@@ -246,7 +256,7 @@ int recv_probe(int fd, int timeout)
 		return 0;
 	}
 
-	ret = read(fd, buf, sizeof(buf));
+	ret = recvmsg(fd, &msg, MSG_DONTWAIT);
 	if (ret % sizeof(struct sr6_xts) != 0) {
 		pr_err("invalid recv len: %d\n", ret);
 		return -1;
