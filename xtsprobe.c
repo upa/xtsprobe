@@ -26,10 +26,6 @@
     |                                                               |
     |                                                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //                                                             //
-    //         Optional Type Length Value objects (variable)       //
-    //                                                             //
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |          Source Port          |       Desitnation Port        |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |            Length             |           Checksum            |
@@ -266,7 +262,9 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 {
 	int n;
 
-	for (n = nsegs - 1; n >= 0; n--) {
+	/* the last segment is the original destination, and it is not
+	 * End.XTS. Thus, print sr6_xts[1] ~ [nsegs - 1]. */
+	for (n = nsegs - 1; n >= 1; n--) {
 		char addr[64];
 		inet_ntop(AF_INET6, &xts[n].sid, addr, sizeof(addr));
 		printf("[%d]\t%s\t%ld.%ld\n", nsegs - n, addr,
