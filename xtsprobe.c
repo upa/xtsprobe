@@ -91,7 +91,9 @@
 
 
 /* irresponsible global variable */
+int hoplimit = 255;
 int seq = 0;
+int print_probe_time = 0;
 
 /* structure contained on UDP playoad of End.XTS */
 struct sr6_xts {
@@ -208,7 +210,7 @@ int send_probe(int fd, struct in6_addr src, struct in6_addr dst,
 	memset(&ip6, 0, sizeof(ip6));
 	ip6.ip6_vfc = 6 << 4;
 	ip6.ip6_plen = htons(size - sizeof(struct ip6_hdr));
-	ip6.ip6_hlim = 255;
+	ip6.ip6_hlim = hoplimit;
 	ip6.ip6_src = src;
 	ip6.ip6_dst = segments[0];
 	ip6.ip6_nxt = IPPROTO_ROUTING;
@@ -267,6 +269,12 @@ int send_probe(int fd, struct in6_addr src, struct in6_addr dst,
 void print_probe(struct sr6_xts *xts, int nsegs)
 {
 	int n;
+	struct timeval ts;
+
+	gettimeofday(&ts, NULL);
+
+	if (print_probe_time)
+		printf("TS=%ld.%09ld ", ts.tv_sec, ts.tv_usec);
 
 	printf("seq=%d TSTAMP ", seq);
 
@@ -279,6 +287,9 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 		       xts[n].tstamp.tv_sec, xts[n].tstamp.tv_nsec);
 		(n > 1) ? printf(" ") : printf("\n");
 	}
+
+	if (print_probe_time)
+		printf("TS=%ld.%09ld ", ts.tv_sec, ts.tv_usec);
 
 	printf("seq=%d OWTIME ", seq);
 	for (n = nsegs - 2; n >= 1; n--) {
@@ -343,9 +354,11 @@ void usage(void)
 	       "    -S source v6 address\n"
 	       "    -D destination v6 address\n"
 	       "    -s SID (multiple)\n"
+	       "    -H hoplimit\n"
 	       "    -c count, 0 means infinite, default 0\n"
 	       "    -t timeout (sec)\n"
 	       "    -i interval (sec)\n"
+	       "    -T print timestamp of probes\n"
 	       "    -h print this help\n"
 	       "\n");
 }
@@ -364,7 +377,7 @@ int main(int argc, char **argv)
 	int raw_sock;
 	int udp_sock;
 
-	while ((ch = getopt(argc, argv, "s:S:D:c:t:i:h")) != -1) {
+	while ((ch = getopt(argc, argv, "s:S:D:H:c:t:i:Th")) != -1) {
 		switch (ch) {
 		case 's':
 			if (nsegs >= MAX_SEGS - 1) {
@@ -381,14 +394,21 @@ int main(int argc, char **argv)
 		case 'S':
 			ret = inet_pton(AF_INET6, optarg, &src);
 			if (ret < 1) {
-				printf("invalid src: %s\n", strerror(errno));
+				pr_err("invalid src: %s\n", strerror(errno));
 				return -1;
 			}
 			break;
 		case 'D':
 			ret = inet_pton(AF_INET6, optarg, &dst);
 			if (ret < 1) {
-				printf("invalid dst: %s\n", strerror(errno));
+				pr_err("invalid dst: %s\n", strerror(errno));
+				return -1;
+			}
+			break;
+		case 'H':
+			hoplimit = atoi(optarg);
+			if (hoplimit > 255 || 0 > hoplimit) {
+				pr_err("invalid hoplimit: %s\n", optarg);
 				return -1;
 			}
 			break;
@@ -400,6 +420,9 @@ int main(int argc, char **argv)
 			break;
 		case 'i':
 			interval = (int)(atof(optarg) * 1000000);
+			break;
+		case 'T':
+			print_probe_time = 1;
 			break;
 		case 'h':
 		default:
