@@ -90,6 +90,9 @@
                                  __func__, ##__VA_ARGS__)
 
 
+/* irresponsible global variable */
+int seq = 0;
+
 /* structure contained on UDP playoad of End.XTS */
 struct sr6_xts {
 	struct in6_addr sid;
@@ -179,8 +182,8 @@ uint16_t checksum(struct in6_addr dst, struct in6_addr src, struct udphdr udp)
         return htons(~sum & 0xFFFF);
 }
 
-int send_probe(int fd, struct in6_addr *segments, int nsegs,
-	       struct in6_addr src)
+int send_probe(int fd, struct in6_addr src, struct in6_addr dst,
+	       struct in6_addr *segments, int nsegs)
 {
 	int ret, size, n;
 	struct ip6_hdr ip6;
@@ -192,6 +195,9 @@ int send_probe(int fd, struct in6_addr *segments, int nsegs,
 	struct msghdr msg;
 	struct sockaddr_in6 in6;
 	
+	/* put the last destination to segment list */
+	segments[nsegs++] = dst;
+
 	size = (sizeof(struct ip6_hdr) +
 		sizeof(struct ipv6_sr_hdr) +
 		sizeof(struct in6_addr) * nsegs +
@@ -262,13 +268,36 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 {
 	int n;
 
+	printf("seq=%d TSTAMP ", seq);
+
 	/* the last segment is the original destination, and it is not
 	 * End.XTS. Thus, print sr6_xts[1] ~ [nsegs - 1]. */
 	for (n = nsegs - 1; n >= 1; n--) {
 		char addr[64];
 		inet_ntop(AF_INET6, &xts[n].sid, addr, sizeof(addr));
-		printf("[%d]\t%s\t%ld.%ld\n", nsegs - n, addr,
+		printf("%s=%ld.%09ld", addr,
 		       xts[n].tstamp.tv_sec, xts[n].tstamp.tv_nsec);
+		(n > 1) ? printf(" ") : printf("\n");
+	}
+
+	printf("seq=%d OWTIME ", seq);
+	for (n = nsegs - 2; n >= 1; n--) {
+		char pb[64], nb[64];
+		struct sr6_xts prev = xts[n + 1];
+		struct sr6_xts next = xts[n];
+
+		if (next.tstamp.tv_nsec < prev.tstamp.tv_nsec) {
+			next.tstamp.tv_nsec += 1000000000;
+			next.tstamp.tv_sec =- 1;
+		}
+
+		inet_ntop(AF_INET6, &prev.sid, pb, sizeof(pb));
+		inet_ntop(AF_INET6, &next.sid, nb, sizeof(nb));
+
+		printf("%s->%s=%ld.%09ld", pb, nb,
+		       next.tstamp.tv_sec - prev.tstamp.tv_sec,
+		       next.tstamp.tv_nsec - prev.tstamp.tv_nsec);
+		(n > 1) ? printf(" ") : printf("\n");
 	}
 }
 
@@ -292,7 +321,7 @@ int recv_probe(int fd, int timeout)
 	}
 
 	if (!x[0].revents & POLLIN) {
-		printf("Timeout\n");
+		printf("seq=%d timeout\n", seq);
 		return 0;
 	}
 
@@ -311,11 +340,13 @@ int recv_probe(int fd, int timeout)
 void usage(void)
 {
 	printf("usage: xtsprobe\n"
-	       "    -s SID list\n"
-	       "    -S source address\n"
+	       "    -S source v6 address\n"
+	       "    -D destination v6 address\n"
+	       "    -s SID (multiple)\n"
 	       "    -c count, 0 means infinite, default 0\n"
 	       "    -t timeout (sec)\n"
 	       "    -i interval (sec)\n"
+	       "    -h print this help\n"
 	       "\n");
 }
    
@@ -325,6 +356,7 @@ int main(int argc, char **argv)
 	int nsegs = 0;
 	struct in6_addr segments[MAX_SEGS];
 	struct in6_addr src = IN6ADDR_ANY_INIT;
+	struct in6_addr dst = IN6ADDR_ANY_INIT;
 	int count = 0;
 	int timeout = 1000;	/* msec for poll() */
 	int interval = 1000000;	/* usec for usleep() */
@@ -332,10 +364,10 @@ int main(int argc, char **argv)
 	int raw_sock;
 	int udp_sock;
 
-	while ((ch = getopt(argc, argv, "s:S:c:t:i:")) != -1) {
+	while ((ch = getopt(argc, argv, "s:S:D:c:t:i:h")) != -1) {
 		switch (ch) {
 		case 's':
-			if (nsegs >= MAX_SEGS) {
+			if (nsegs >= MAX_SEGS - 1) {
 				pr_err("too many segments\n");
 				return -1;
 			}
@@ -353,6 +385,13 @@ int main(int argc, char **argv)
 				return -1;
 			}
 			break;
+		case 'D':
+			ret = inet_pton(AF_INET6, optarg, &dst);
+			if (ret < 1) {
+				printf("invalid dst: %s\n", strerror(errno));
+				return -1;
+			}
+			break;
 		case 'c':
 			count = atoi(optarg);
 			break;
@@ -362,27 +401,41 @@ int main(int argc, char **argv)
 		case 'i':
 			interval = (int)(atof(optarg) * 1000000);
 			break;
+		case 'h':
 		default:
 			usage();
 			return 1;
 		}
 	}
 
+	if (memcmp(&src, &in6addr_any, sizeof(src)) == 0)
+		src = dst;
+	else if (memcmp(&dst, &in6addr_any, sizeof(src)) == 0)
+		dst = src;
+
 	raw_sock = create_raw_sock();
 	udp_sock = create_udp_sock();
 
+	/* description output */
+	char sb[64], db[64];
+	inet_ntop(AF_INET6, &src, sb, sizeof(sb));
+	inet_ntop(AF_INET6, &dst, db, sizeof(db));
+	printf("XTSPROBE: From %s to %s through ", sb, db);
 	for (n = 0; n < nsegs; n++) {
 		char buf[64];
 		inet_ntop(AF_INET6, &segments[n], buf, sizeof(buf));
-		printf("[%d] %s\n", n, buf);
+		printf("%s", buf);
+		(n < nsegs - 1) ? printf(", ") : printf("\n");
 	}
 
 	while (1) {
 		long elapsed;
 		struct timeval start, end;
 
+		seq++;
+
 		gettimeofday(&start, NULL);
-		ret = send_probe(raw_sock, segments, nsegs, src);
+		ret = send_probe(raw_sock, src, dst, segments, nsegs);
 		if (ret < 0) {
 			pr_err("send failed: %s\n", strerror(errno));
 			gettimeofday(&end, NULL);
