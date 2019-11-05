@@ -291,7 +291,7 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 	if (print_probe_time)
 		printf("TS=%ld.%09ld ", ts.tv_sec, ts.tv_usec);
 
-	if (nsegs - 2 > 1)
+	if (nsegs - 2 >= 1)
 		printf("seq=%d OWTIME ", seq);
 	for (n = nsegs - 2; n >= 1; n--) {
 		char pb[64], nb[64];
