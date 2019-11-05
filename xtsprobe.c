@@ -285,13 +285,14 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 		inet_ntop(AF_INET6, &xts[n].sid, addr, sizeof(addr));
 		printf("%s=%ld.%09ld", addr,
 		       xts[n].tstamp.tv_sec, xts[n].tstamp.tv_nsec);
-		(n > 1) ? printf(" ") : printf("\n");
+		(n - 1 < 1) ? printf("\n") : printf(" ");
 	}
 
 	if (print_probe_time)
 		printf("TS=%ld.%09ld ", ts.tv_sec, ts.tv_usec);
 
-	printf("seq=%d OWTIME ", seq);
+	if (nsegs - 2 > 1)
+		printf("seq=%d OWTIME ", seq);
 	for (n = nsegs - 2; n >= 1; n--) {
 		char pb[64], nb[64];
 		struct sr6_xts prev = xts[n + 1];
@@ -308,7 +309,7 @@ void print_probe(struct sr6_xts *xts, int nsegs)
 		printf("%s->%s=%ld.%09ld", pb, nb,
 		       next.tstamp.tv_sec - prev.tstamp.tv_sec,
 		       next.tstamp.tv_nsec - prev.tstamp.tv_nsec);
-		(n > 1) ? printf(" ") : printf("\n");
+		(n - 1 < 1) ? printf("\n") : printf(" ");
 	}
 }
 
