@@ -13,3 +13,6 @@ all: $(PROGNAME)
 clean:
 	rm -rf *.o
 	rm -rf $(PROGNAME)
+
+install:
+	install xtsprobe /usr/local/bin/xtsprobe

@@ -444,12 +444,12 @@ int main(int argc, char **argv)
 	char sb[64], db[64];
 	inet_ntop(AF_INET6, &src, sb, sizeof(sb));
 	inet_ntop(AF_INET6, &dst, db, sizeof(db));
-	printf("XTSPROBE: From %s to %s through ", sb, db);
+	printf("XTSPROBE: From %s\n", sb);
+	printf("XTSPROBE: To   %s\n", db);
 	for (n = 0; n < nsegs; n++) {
 		char buf[64];
 		inet_ntop(AF_INET6, &segments[n], buf, sizeof(buf));
-		printf("%s", buf);
-		(n < nsegs - 1) ? printf(", ") : printf("\n");
+		printf("XTSPROBE: via  %s\n", buf);
 	}
 
 	while (1) {
