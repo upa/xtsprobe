@@ -93,6 +93,7 @@
 /* irresponsible global variable */
 int hoplimit = 255;
 int seq = 0;
+int port = XTSPROBE_PORT;
 int print_probe_time = 0;
 
 /* structure contained on UDP playoad of End.XTS */
@@ -134,7 +135,7 @@ int create_udp_sock(void)
 
 	memset(&in6, 0, sizeof(in6));
 	in6.sin6_family = AF_INET6;
-	in6.sin6_port = htons(XTSPROBE_PORT);
+	in6.sin6_port = htons(port);
 
 	if (bind(fd, (struct sockaddr *)&in6, sizeof(in6)) < 0) {
 		pr_err("failed to bind udp socket: %s\n", strerror(errno));
@@ -231,8 +232,8 @@ int send_probe(int fd, struct in6_addr src, struct in6_addr dst,
 	}
 
 	/* build UDP */
-	udp.source = htons(XTSPROBE_PORT);
-	udp.dest = htons(XTSPROBE_PORT);
+	udp.source = htons(port);
+	udp.dest = htons(port);
 	udp.len = htons(sizeof(struct udphdr) +
 			sizeof(struct sr6_xts) * nsegs);
 	udp.check = 0;
@@ -359,6 +360,7 @@ void usage(void)
 	       "    -c count, 0 means infinite, default 0\n"
 	       "    -t timeout (sec)\n"
 	       "    -i interval (sec)\n"
+	       "    -p port number\n"
 	       "    -T print timestamp of probes\n"
 	       "    -h print this help\n"
 	       "\n");
@@ -378,7 +380,7 @@ int main(int argc, char **argv)
 	int raw_sock;
 	int udp_sock;
 
-	while ((ch = getopt(argc, argv, "s:S:D:H:c:t:i:Th")) != -1) {
+	while ((ch = getopt(argc, argv, "s:S:D:H:c:t:i:p:Th")) != -1) {
 		switch (ch) {
 		case 's':
 			if (nsegs >= MAX_SEGS - 1) {
@@ -421,6 +423,13 @@ int main(int argc, char **argv)
 			break;
 		case 'i':
 			interval = (int)(atof(optarg) * 1000000);
+			break;
+		case 'p':
+			port = atoi(optarg);
+			if (port < 0 || port > 0xFFFF) {
+				pr_err("invalid port number: %s\n", optarg);
+				return -1;
+			}
 			break;
 		case 'T':
 			print_probe_time = 1;
